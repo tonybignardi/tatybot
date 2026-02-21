@@ -8,6 +8,7 @@ const messageCounterSchema = new mongoose.Schema({
   conteudo: { type: String, required: true },
   tipo: { type: String, enum: ['+', '-'], required: true }, // + ou -
   contador: { type: Number, default: 0 },
+  executed: { type: Boolean, default: false }, // Flag para evitar múltiplas execuções
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

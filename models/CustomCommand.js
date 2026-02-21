@@ -20,12 +20,6 @@ const customCommandSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    // Contexto/categoria do dado armazenado (ex: "km", "pontuação", "arrecadação")
-    contexto: {
-      type: String,
-      required: true,
-      default: 'generico',
-    },
     // Tipo de dado esperado (numero, texto, moeda, etc)
     tipoDado: {
       type: String,
@@ -56,13 +50,6 @@ const customCommandSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    // Campo para indicar se usa UPSERT (atualizar se existir) ou INSERT (sempre novo)
-    // Se vazio [] = INSERT sempre novo
-    // Se preenchido ex: ["mes", "ano"] = UPSERT buscando por groupId + userId + mes + ano
-    upsertBy: {
-      type: [String],
-      default: [],
-    },
     createdBy: String, // userId de quem criou
     updatedBy: String, // userId de quem atualizou por último
     createdAt: {
@@ -79,7 +66,7 @@ const customCommandSchema = new mongoose.Schema(
 
 // Índice composto para unicidade de comando por grupo
 customCommandSchema.index({ groupId: 1, commandName: 1 }, { unique: true });
-customCommandSchema.index({ groupId: 1, contexto: 1 });
+customCommandSchema.index({ groupId: 1, commandName: 1 });
 
 const CustomCommand = mongoose.model('CustomCommand', customCommandSchema);
 

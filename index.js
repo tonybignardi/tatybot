@@ -205,12 +205,25 @@ client.on('message', async (msg) => {
 client.on('message_reaction', async (reacao) => {
   try {
     console.log(`\n⭐ REAÇÃO DETECTADA!`);
-    console.log(`   Emoji: ${reacao.reaction}`);
-    console.log(`   Removida: ${reacao.isRemove()}`);
-    console.log(`   Mensagem ID: ${reacao.msgId.id}`);
+    console.log(`   Estrutura do evento:`, JSON.stringify(reacao, null, 2));
+    
+    // Determinar se é remoção ou adição
+    // A reação pode ser uma string vazia se removida, ou ter um emoji
+    const isRemoved = !reacao.reaction || reacao.reaction.trim() === '';
+    const emoji = reacao.reaction || '❌';
+    
+    console.log(`   Emoji: ${emoji}`);
+    console.log(`   Removida: ${isRemoved}`);
+    console.log(`   Mensagem ID: ${reacao.msgId?.id}`);
 
     // Buscar o contador no banco
-    const counter = await MessageCounter.findOne({ messageId: reacao.msgId.id });
+    const messageId = reacao.msgId?.id;
+    if (!messageId) {
+      console.log(`⏭️  Não consegui extrair ID da mensagem`);
+      return;
+    }
+
+    const counter = await MessageCounter.findOne({ messageId });
 
     if (!counter) {
       console.log(`⏭️  Nenhum contador encontrado para essa mensagem`);
@@ -223,7 +236,7 @@ client.on('message_reaction', async (reacao) => {
 
     // Incrementar ou decrementar
     let counterAnterior = counter.contador;
-    if (reacao.isRemove()) {
+    if (isRemoved) {
       // Removeu a reação = decrementar
       counter.contador = Math.max(0, counter.contador - 1);
       console.log(`⬇️  Decrementando: ${counter.contador}`);
@@ -267,15 +280,27 @@ client.on('message_reaction', async (reacao) => {
     console.log(`   Tipo: ${tipo}`);
     console.log(`   Limite configurado: ${config.limite}`);
     console.log(`   Contador atual: ${counter.contador}`);
+    console.log(`   Já foi executado: ${counter.executed}`);
 
-    // Verificar se atingiu o limite (e não estava no limite antes)
-    if (counter.contador === config.limite && counterAnterior < config.limite) {
+    // Verificar se atingiu o limite (e não era executado ainda)
+    if (counter.contador === config.limite && !counter.executed) {
       console.log(`\n🚀 LIMITE ATINGIDO! Executando comando: ${config.comando}`);
 
       try {
-        // Buscar a mensagem original para pegar o chat
-        const originalMsg = await client.getMessageById(reacao.msgId.id);
-        const chat = await originalMsg.getChat();
+        // Buscar o chat usando o groupId armazenado no counter
+        let chat = null;
+        try {
+          chat = await client.getChatById(counter.groupId);
+        } catch (err) {
+          console.warn(`⚠️ Erro ao buscar chat por groupId, tentando alternativa...`);
+          // Se falhar, tentar buscar a partir de uma conversa existente
+          const chats = await client.getChats();
+          chat = chats.find(c => c.id._serialized === counter.groupId);
+        }
+
+        if (!chat) {
+          throw new Error(`Não conseguiu encontrar o chat do grupo`);
+        }
 
         // Construir o comando a executar com o conteúdo da mensagem
         // Exemplo: "#ok 5 kms" se o comando é #ok e o conteúdo é "5 kms"
@@ -286,12 +311,21 @@ client.on('message_reaction', async (reacao) => {
 
         // Simular uma mensagem sendo enviada para processar o comando
         // Criar um objeto mock de mensagem
+        // Camuflar como se é uma resposta à mensagem original
         const msgAutomatica = {
           id: { id: `auto_${Date.now()}` },
           author: counter.userId,
-          _data: { notifyName: counter.userName },
+          _data: {
+            notifyName: counter.userName,
+            quotedParticipant: counter.userId,  // Simular que é uma resposta
+            quotedMsg: {
+              notifyName: counter.userName
+            }
+          },
           from: counter.userId,
           body: comandoComConteudo,
+          idUsuarioRespondido: counter.userId,
+          nomeUsuarioRespondido: counter.userName,
           getChat: async () => chat,
           getQuotedMessage: async () => null,
           hasQuotedMsg: false,
@@ -317,6 +351,11 @@ client.on('message_reaction', async (reacao) => {
         }
 
         console.log(`✅ Comando executado com sucesso!`);
+
+        // Marcar como executado para evitar múltiplas execuções
+        counter.executed = true;
+        await counter.save();
+        console.log(`📌 Comando marcado como executado para evitar re-execução`);
       } catch (err) {
         console.error(`❌ Erro ao executar comando automático: ${err.message}`);
       }

@@ -28,7 +28,6 @@ class DataQueryHandler {
         userId,
         userName,
         valor: dados || 'consulta',
-        contexto: customCmd.contexto,
       });
 
       await commandData.save();
@@ -38,7 +37,6 @@ class DataQueryHandler {
         comando: customCmd.commandName,
         instrucao: customCmd.data,
         dados: dados,
-        contexto: customCmd.contexto,
       };
     } catch (error) {
       console.error('Erro ao executar comando:', error.message);

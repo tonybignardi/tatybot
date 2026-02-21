@@ -10,6 +10,7 @@ yarn-error.log
 
 # Bot authentication
 .wwebjs_auth/
+.wwebjs_cache/
 
 # IDE
 .vscode/
@@ -26,11 +27,18 @@ Thumbs.db
 # Logs
 logs/
 *.log
+prompt.txt
 
 # Temp
 tmp/
 temp/
 .cache/
+
+# Debug scripts (local use only)
+showMongo.js
+checkMongoData.js
+resetDatabase.js
+admin.js
 
 # Build
 dist/

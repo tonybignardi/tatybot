@@ -4,7 +4,7 @@ import CommandLog from '../models/CommandLog.js';
 import CustomCommand from '../models/CustomCommand.js';
 import CommandData from '../models/CommandData.js';
 import UserName from '../models/UserName.js';
-import { parseNaturalCommand, executeInterpretedCommand, analyzeCommandDefinition } from '../services/naturalLanguageProcessor.js';
+import { parseNaturalCommand, executeInterpretedCommand } from '../services/naturalLanguageProcessor.js';
 
 class CommandHandler {
   static async handleCommand(msg, command, groupId, groupName) {
@@ -334,7 +334,8 @@ class CommandHandler {
 
   static async handleCustomCommand(msg, groupId, groupName, userId, userName, logData, adminOnly = false) {
     // Extrair nome do comando e dados
-    const commandPattern = adminOnly ? /^#cmda\s+(#\w+)(?:\s+(.*))?/i : /^#cmd\s+(#\w+)(?:\s+(.*))?/i;
+    // Aceita caracteres especiais como + e - no nome do comando
+    const commandPattern = adminOnly ? /^#cmda\s+(#\S+)(?:\s+(.*))?/i : /^#cmd\s+(#\S+)(?:\s+(.*))?/i;
     const commandMatch = msg.body.match(commandPattern);
     
     // Se não houver argumento, listar todos
@@ -354,7 +355,7 @@ class CommandHandler {
       }
 
       const commandsList = filteredCommands
-        .map((cmd, idx) => `${idx + 1}. ${cmd.commandName}\n   ${cmd.data}\n   Contexto: ${cmd.contexto || 'geral'}`)
+        .map((cmd, idx) => `${idx + 1}. ${cmd.commandName}\n   ${cmd.data}`)
         .join('\n\n');
 
       logData.status = 'success';
@@ -378,9 +379,9 @@ class CommandHandler {
     const commandName = commandMatch[1].toLowerCase(); // #nome
     const data = commandMatch[2] ? commandMatch[2].trim() : '';
 
-    // TRATAMENTO ESPECIAL PARA #conf+ E #conf-
-    if (adminOnly && (commandName === '#conf+' || commandName === '#conf-')) {
-      if (commandName === '#conf+') {
+    // TRATAMENTO ESPECIAL PARA #conf+ E #conf- (também aceita #config+ e #config-)
+    if (adminOnly && (commandName === '#conf+' || commandName === '#conf-' || commandName === '#config+' || commandName === '#config-')) {
+      if (commandName === '#conf+' || commandName === '#config+') {
         if (!data) {
           // Mostrar configuração atual de +
           if (!groupAdmin.counterConfigPlus || !groupAdmin.counterConfigPlus.limite) {
@@ -396,7 +397,7 @@ class CommandHandler {
         }
         // Editar configuração
         return await this.handleConfigCounterPlus(msg, groupId, groupName, userId, userName, msg.body, logData);
-      } else if (commandName === '#conf-') {
+      } else if (commandName === '#conf-' || commandName === '#config-') {
         if (!data) {
           // Mostrar configuração atual de -
           if (!groupAdmin.counterConfigMinus || !groupAdmin.counterConfigMinus.limite) {
@@ -440,12 +441,6 @@ class CommandHandler {
     const analise = await this.analisarRequerimentoUsuarioRespondido(data);
     const { requerUsuarioRespondido, tipoComando, camposSalvados, validacao } = analise;
     
-    // 🤖 NOVO: Chamar ChatGPT para analisar a definição e detectar UPSERT
-    console.log(`\n🤖 Chamando ChatGPT para analisar definição do comando...`);
-    const analiseDefinicao = await analyzeCommandDefinition(data);
-    const { upsertBy } = analiseDefinicao;
-    console.log(`✅ ChatGPT análise: upsertBy = ${JSON.stringify(upsertBy)}`);
-    
     // Normalizar tipoComando para insert/list/delete (minúscula)
     const tipoNormalizado = (tipoComando || 'insert').toLowerCase().replace('ção', '').replace('gem', '');
     const tipoFinal = tipoNormalizado.includes('list') ? 'list' : (tipoNormalizado.includes('del') ? 'delete' : 'insert');
@@ -467,7 +462,6 @@ class CommandHandler {
         tipoComando: tipoFinal,
         requerUsuarioRespondido,
         camposSalvados: camposSalvados || [],
-        upsertBy: upsertBy || [],
         createdBy: userId,
         updatedBy: userId,
       });
@@ -477,7 +471,6 @@ class CommandHandler {
       customCmd.tipoComando = tipoFinal;
       customCmd.requerUsuarioRespondido = requerUsuarioRespondido;
       customCmd.camposSalvados = camposSalvados || [];
-      customCmd.upsertBy = upsertBy || [];
       customCmd.updatedBy = userId;
     }
 
@@ -492,11 +485,8 @@ class CommandHandler {
     let camposInfo = camposSalvados && camposSalvados.length > 0 
       ? `\n📦 Campos salvos: ${camposSalvados.map(c => `$${c}`).join(', ')}`
       : '';
-    let upsertInfo = upsertBy && upsertBy.length > 0
-      ? `\n🔄 UPSERT por: ${upsertBy.join(', ')}`
-      : '';
     
-    return `✅ Comando ${commandName} salvo! ${tipoRequisito}${camposInfo}${upsertInfo}\n\n📝 ${data}`;
+    return `✅ Comando ${commandName} salvo! ${tipoRequisito}${camposInfo}\n\n📝 ${data}`;
   }
 
   static async executeCustomCommand(msg, command, groupId, groupName, userId, userName, messageBody, logData) {
@@ -559,83 +549,31 @@ class CommandHandler {
       console.log(`   idUsuarioRespondido disponível: ${!!idUsuarioRespondido}`);
       console.log(`   userId executor: ${userId}`);
       console.log(`   userIdToSave: ${userIdToSave} ${customCmd.requerUsuarioRespondido ? '(respondido)' : '(próprio)'}`);
-      console.log(`   upsertBy: ${JSON.stringify(customCmd.upsertBy)}`);
 
-      // ✅ NOVO: Verificar se é UPSERT ou INSERT
-      if (customCmd.upsertBy && customCmd.upsertBy.length > 0) {
-        // UPSERT: Construir filtro com base nos campos especificados
-        console.log(`\n🔄 UPSERT MODE ATIVADO`);
-        
-        const filtro = {
-          groupId,
-          commandName: command,
-          userId: userIdToSave
-        };
-        
-        // Adicionar campos do upsertBy ao filtro (ex: mes, ano)
-        // Se valorParaSalvar for objeto com as chaves (dados estruturado)
-        if (typeof valorParaSalvar === 'object' && valorParaSalvar.tipo !== 'multiplo') {
-          // Dados estruturado: adicionar valores específicos ao filtro
-          for (const field of customCmd.upsertBy) {
-            if (valorParaSalvar[field]) {
-              filtro[`dados.${field}`] = valorParaSalvar[field];
-              console.log(`   Filtro adicional: dados.${field} = ${valorParaSalvar[field]}`);
-            }
-          }
-        }
-        
-        console.log(`   Filtro final: ${JSON.stringify(filtro)}`);
-        
-        // Executar UPSERT
-        const resultado = await CommandData.findOneAndUpdate(
-          filtro,
-          {
-            $set: {
-              groupId,
-              groupName,
-              commandName: command,
-              userId: userIdToSave,
-              userName: userNameToSave,
-              dados: valorParaSalvar,
-              contexto: customCmd.contexto,
-              updatedAt: new Date(),
-            },
-            $setOnInsert: {
-              vinculo: { tipo: null, id: null },
-              createdAt: new Date(),
-            }
-          },
-          { upsert: true, new: true }
-        );
-        
-        console.log(`   ✅ UPSERT executado - ${resultado ? 'atualizado' : 'criado novo'}`);
-      } else {
-        // INSERT: Sempre criar novo registro (comportamento anterior)
-        console.log(`\n➕ INSERT MODE ATIVADO`);
-        
-        const commandData = new CommandData({
-          groupId,
-          groupName,
-          commandName: command,
-          userId: userIdToSave,
-          userName: userNameToSave,
-          dados: valorParaSalvar,
-          contexto: customCmd.contexto,
-          vinculo: {
-            tipo: null,
-            id: null,
-          },
-        });
+      // INSERT: Sempre criar novo registro
+      console.log(`\n➕ INSERT MODE ATIVADO`);
+      
+      const commandData = new CommandData({
+        groupId,
+        groupName,
+        commandName: command,
+        userId: userIdToSave,
+        userName: userNameToSave,
+        dados: valorParaSalvar,
+        vinculo: {
+          tipo: null,
+          id: null,
+        },
+      });
 
-        await commandData.save();
-        console.log(`   ✅ INSERT executado`);
-      }
+      await commandData.save();
+      console.log(`   ✅ INSERT executado`);
 
       logData.status = 'success';
       logData.response = `Executado comando ${command} com dados: ${dados}`;
       await this.logCommand(logData);
       
-      return `✅ Comando ${command} executado!\n\n📋 Instruções:\n${customCmd.data}\n\n💾 Dados armazenados:\n${dados}\n\n📊 Contexto: ${customCmd.contexto}`;
+      return `✅ Comando ${command} executado!\n\n📋 Instruções:\n${customCmd.data}\n\n💾 Dados armazenados:\n${dados}`;
     } catch (error) {
       console.error('Erro ao salvar dados do comando:', error.message);
       logData.status = 'error';
@@ -1006,8 +944,19 @@ class CommandHandler {
           const valorLimpo = {};
           for (const [chave, valor] of Object.entries(valorParaSalvar)) {
             if (typeof valor === 'string') {
-              valorLimpo[chave] = this.limparValor(valor);
-              console.log(`   Limpeza ${chave}: "${valor}" → "${valorLimpo[chave]}"`);
+              // Campos de texto (status, mes, ano, nome, etc) não devem ser limpados agressivamente
+              // Se o valor contém texto não-numérico (ex: "ATIVO"), manter como está
+              const ehTextoNaoNumerico = /[a-zA-Z]+/.test(valor) && !/^\d+(?:\.\d+)?/.test(valor);
+              
+              if (ehTextoNaoNumerico) {
+                // É um texto como "ATIVO", "pendente", etc - manter como está (apenas trim)
+                valorLimpo[chave] = valor.trim().toUpperCase();
+                console.log(`   ✅ Campo de texto ${chave}: "${valor}" → "${valorLimpo[chave]}" (mantido, apenas trim)`);
+              } else {
+                // É numérico ou misto (ex: "5 km") - limpar normalmente
+                valorLimpo[chave] = this.limparValor(valor);
+                console.log(`   🧹 Limpeza ${chave}: "${valor}" → "${valorLimpo[chave]}"`);
+              }
             } else {
               valorLimpo[chave] = valor;
             }
@@ -1075,11 +1024,118 @@ class CommandHandler {
           userId: userData.idUsuario,
           userName: userData.userName,
           dados: valorParaSalvar,
-          contexto: customCmd.contexto,
         });
 
         await commandData.save();
       }
+
+      // Deletar registros (para DELEÇÃO)
+      else if (acao === 'deletar') {
+        console.log(`\n🗑️ DELETE MODE ATIVADO`);
+        console.log(`   Filtro: ${JSON.stringify(parsed.filtro)}`);
+        
+        // Construir filtro para busca
+        const filtro = {
+          groupId,
+          commandName: comandoParaExecutar,
+          userId: userData.idUsuario,
+        };
+        
+        // Adicionar campos do filtro ao resultado do ChatGPT
+        if (parsed.filtro && typeof parsed.filtro === 'object') {
+          // Se o filtro contém dados estruturados (ex: {mes, ano})
+          for (const [chave, valor] of Object.entries(parsed.filtro)) {
+            if (valor !== undefined && valor !== null) {
+              // Limpar o valor se for string
+              let valorFiltro = valor;
+              if (typeof valor === 'string') {
+                const ehTextoNaoNumerico = /[a-zA-Z]+/.test(valor) && !/^\d+(?:\.\d+)?/.test(valor);
+                if (!ehTextoNaoNumerico) {
+                  valorFiltro = this.limparValor(valor);
+                }
+              }
+              filtro[`dados.${chave}`] = valorFiltro;
+              console.log(`   Filtro adicional: dados.${chave} = "${valorFiltro}"`);
+            }
+          }
+        }
+        
+        console.log(`   Filtro final: ${JSON.stringify(filtro)}`);
+        
+        // Executar deleteMany
+        const resultado = await CommandData.deleteMany(filtro);
+        console.log(`   ✅ DELETE executado - ${resultado.deletedCount} registros removidos`);
+      }
+
+      // Atualizar registros (para ATUALIZAÇÃO)
+      else if (acao === 'atualizar') {
+        console.log(`\n✏️  UPDATE MODE ATIVADO`);
+        console.log(`   Filtro: ${JSON.stringify(parsed.filtro)}`);
+        console.log(`   Dados para atualizar: ${JSON.stringify(parsed.dados)}`);
+        
+        // Construir filtro para busca
+        const filtro = {
+          groupId,
+          commandName: comandoParaExecutar,
+          userId: userData.idUsuario,
+        };
+        
+        // Adicionar campos do filtro
+        if (parsed.filtro && typeof parsed.filtro === 'object') {
+          for (const [chave, valor] of Object.entries(parsed.filtro)) {
+            if (valor !== undefined && valor !== null) {
+              let valorFiltro = valor;
+              if (typeof valor === 'string') {
+                const ehTextoNaoNumerico = /[a-zA-Z]+/.test(valor) && !/^\d+(?:\.\d+)?/.test(valor);
+                if (!ehTextoNaoNumerico) {
+                  valorFiltro = this.limparValor(valor);
+                }
+              }
+              filtro[`dados.${chave}`] = valorFiltro;
+              console.log(`   Filtro adicional: dados.${chave} = "${valorFiltro}"`);
+            }
+          }
+        }
+        
+        // Preparar dados para atualização
+        let dadosParaAtualizar = parsed.dados || {};
+        if (typeof dadosParaAtualizar === 'object') {
+          // Limpar cada valor
+          for (const [chave, valor] of Object.entries(dadosParaAtualizar)) {
+            if (typeof valor === 'string') {
+              const ehTextoNaoNumerico = /[a-zA-Z]+/.test(valor) && !/^\d+(?:\.\d+)?/.test(valor);
+              if (ehTextoNaoNumerico) {
+                dadosParaAtualizar[chave] = valor.trim().toUpperCase();
+              } else {
+                dadosParaAtualizar[chave] = this.limparValor(valor);
+              }
+            }
+          }
+        }
+        
+        console.log(`   Filtro final: ${JSON.stringify(filtro)}`);
+        console.log(`   Dados finais: ${JSON.stringify(dadosParaAtualizar)}`);
+        
+        // Construir $set dinamicamente para atualizar subcampos de dados
+        // Ao invés de sobrescrever todo dados: {}, atualiza apenas dados.campo
+        const updateSet = { updatedAt: new Date() };
+        for (const [chave, valor] of Object.entries(dadosParaAtualizar)) {
+          updateSet[`dados.${chave}`] = valor;
+          console.log(`   Vai atualizar: dados.${chave} = "${valor}"`);
+        }
+        
+        console.log(`   Update final: ${JSON.stringify(updateSet)}`);
+        
+        // Executar updateMany
+        const resultado = await CommandData.updateMany(
+          filtro,
+          {
+            $set: updateSet
+          }
+        );
+        console.log(`   ✅ UPDATE executado - ${resultado.modifiedCount} registros atualizados`);
+      }
+
 
       // Log do comando bem-sucedido
       logData.status = 'success';

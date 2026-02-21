@@ -35,12 +35,6 @@ const commandDataSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       required: true,
     },
-    // Contexto do comando (ex: "km", "pontuação", "arrecadação")
-    contexto: {
-      type: String,
-      required: true,
-      index: true,
-    },
     // Vinculo genérico com outras entidades (evento, mes, partida, arrecadação, etc)
     vinculo: {
       tipo: String, // "evento", "mes", "partida", "arrecadacao", etc
@@ -66,7 +60,7 @@ const commandDataSchema = new mongoose.Schema(
 );
 
 // Índice composto para buscas rápidas
-commandDataSchema.index({ groupId: 1, commandName: 1, contexto: 1 });
+commandDataSchema.index({ groupId: 1, commandName: 1 });
 commandDataSchema.index({ groupId: 1, userId: 1, createdAt: -1 });
 
 const CommandData = mongoose.model('CommandData', commandDataSchema);

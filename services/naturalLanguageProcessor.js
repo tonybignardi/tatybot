@@ -78,11 +78,19 @@ Você retorna os dados que serão inseridos no MongoDB.
 ⚠️ CAMPOS ESPECÍFICOS A SALVAR (identificados com $):
 Este comando TEM campos específicos a salvar: [${camposFormatados}]
 
+⚠️ VALORES FIXOS (campos com = na descrição):
+Se a descrição menciona um campo com um valor fixo (ex: $status=ATIVO):
+- Esse campo SEMPRE recebe esse valor, INDEPENDENTE do que o usuário digita
+- EXEMPLO CORRETO: 
+  Descrição: "adiciona um registro com $mes, $ano, $meta e $status=ATIVO"
+  Resposta: { "dados": {"mes": "02", "ano": "2026", "meta": "50", "status": "ATIVO"} }
+  → O status é SEMPRE "ATIVO", como está fixo na descrição!
+
 🔧 REGRAS CRÍTICAS DE LIMPEZA DE DADOS:
 1. REMOVA UNIDADES: "60km" → "60", "150m" → "150", "25kg" → "25", "3.5L" → "3.5"
 2. REMOVA CARACTERES ESPECIAIS: Mantenha apenas números, pontos (.) e hífens (-) quando necessário
 3. REMOVA ESPAÇOS DESNECESSÁRIOS: "2 026" → "2026", " 60 " → "60"
-4. PARA DATAS/MÊS: Mantenha apenas números: "fevereiro" → consulte contexto, "02" → "02"
+4. PARA DATAS/MÊS: Mantenha apenas números: "fevereiro" → "02", "02" → "02"
 5. PARA VALORES MONETÁRIOS: Remova símbolos de moeda: "R$ 100,50" → "100.50" (use ponto, não vírgula)
 6. TIPO DE DADO: Se campo é "mes", o valor deve ser 1-12; se é "ano" deve ser 4 dígitos, se é "meta/valor" deve ser número puro
 7. NUNCA salve: unidades, símbolos, caracteres especiais desnecessários - isso pode quebrar queries MongoDB futuras!`;
@@ -90,43 +98,53 @@ Este comando TEM campos específicos a salvar: [${camposFormatados}]
 
   section += `
 
-🔴 CRÍTICO - DETECTAR UPSERT (Inserir OU Atualizar):
-Se a descrição menciona "altera", "atualiza", "modifica" + menciona em quais campos fazer a busca:
+🔴 CRÍTICO - 3 TIPOS DE AÇÃO POSSÍVEL:
 
-EXEMPLO:
-  Descrição: "adiciona um registro para meta com $mes, $ano, $meta OU ALTERA a $meta se o registro com $ano e $mes já existir"
-  → É UPSERT! Buscar por: mes, ano | Atualizar: meta
-  → Retorne OBRIGATORIAMENTE um campo: "upsertBy": ["mes", "ano"]
-
-SE A DESCRIÇÃO MENCIONA ALTERA/ATUALIZA:
-- Identifique QUAIS CAMPOS são a chave para buscar (normalmente antes de "já existir/já salvo/etc")
-- Retorne: "upsertBy": ["campo1", "campo2"]
-- Se não conseguir extrair, deixe "upsertBy": []
-
-SE A DESCRIÇÃO NÃO menciona ALTERA/ATUALIZA:
-- É simplesmente INSERT: "upsertBy": []
-
-EXEMPLO CORRETO (UPSERT):
+OPÇÃO 1: INSERIR (padrão)
+- Descrição: "adiciona um registro..."
+- Retorne: "acao": "inserir"
+- Exemplo de resposta:
 {
   "acao": "inserir",
-  "comando": "#nome",
-  "dados": "valor a inserir",
-  "dados_vetor": ["valor1", "valor2", ...],
-  "upsertBy": ["mes", "ano"],
-  "explicacao": "Descrição do que vai ser inserido/atualizado",
+  "comando": "#meta",
+  "dados": {"mes": "02", "ano": "2026", "meta": "50", "status": "ATIVO"},
+  "dados_vetor": ["02", "2026", "50", "ATIVO"],
+  "explicacao": "Adiciona meta para fev/2026 com valor 50 e status ATIVO",
   "confianca": 0.95,
   "erro": null,
   "entendeu": true
 }
 
-EXEMPLO CORRETO (INSERT apenas):
+OPÇÃO 2: ATUALIZAR 
+- Descrição contém: "altera", "atualiza", "modifica" um registro EXISTENTE
+- Retorne: "acao": "atualizar"
+- Você DEVE fornecer:
+  - "filtro": {campos que identificam qual registro} (ex: {"mes": "02", "ano": "2026"})
+  - "dados": {APENAS os campos que vão ser ALTERADOS} (ex: {"meta": "75"})
+- ⚠️ IMPORTANTE: Retorne APENAS os campos que MUDAM! Não precisa de campos do filtro, nem campos que não mudam!
+- Exemplo de resposta:
 {
-  "acao": "inserir",
-  "comando": "#nome",
-  "dados": "valor a inserir",
-  "dados_vetor": ["valor1"],
-  "upsertBy": [],
-  "explicacao": "Descrição do que vai ser inserido",
+  "acao": "atualizar",
+  "comando": "#meta",
+  "filtro": {"mes": "02", "ano": "2026"},
+  "dados": {"meta": "75"},
+  "explicacao": "Atualiza a meta de fev/2026 para 75 (mantém mes, ano, status iguais)",
+  "confianca": 0.95,
+  "erro": null,
+  "entendeu": true
+}
+
+OPÇÃO 3: DELETAR
+- Descrição contém: "remove", "apaga", "deleta" um registro
+- Retorne: "acao": "deletar"
+- Você DEVE fornecer:
+  - "filtro": {campos que identificam qual registro remover}
+- Exemplo de resposta:
+{
+  "acao": "deletar",
+  "comando": "#meta",
+  "filtro": {"mes": "02", "ano": "2026"},
+  "explicacao": "Remove o registro de meta para fev/2026",
   "confianca": 0.95,
   "erro": null,
   "entendeu": true
@@ -391,7 +409,6 @@ Cada registro tem esses campos:
 - userId: string (ID do usuário que executou)
 - userName: string (nome do usuário padrão do WhatsApp)
 - dados: string ou objeto (▼ VER ABAIXO)
-- contexto: string (contexto do comando ex: "km", "pontuação")
 - createdAt: date (timestamp automático)
 - vinculo: object optional - REFERENCIA PARA OUTRO REGISTRO COMMANDDATA
 
@@ -448,7 +465,7 @@ export async function parseNaturalCommand(userMessage, groupId, userData) {
     if (detectedCommand) {
       const cmd = await CustomCommand.findOne({ groupId, commandName: detectedCommand });
       if (cmd) {
-        commandInfo = `${cmd.commandName}: ${cmd.data} | Contexto: ${cmd.contexto}`;
+        commandInfo = `${cmd.commandName}: ${cmd.data}`;
         camposSalvos = cmd.camposSalvados || [];
         tipoComando = cmd.tipoComando || 'insert'; // Ler o tipo do comando
         console.log(`✅ Comando encontrado: ${commandInfo}`);
@@ -462,7 +479,7 @@ export async function parseNaturalCommand(userMessage, groupId, userData) {
       console.log('📋 Nenhum comando detectado, listando todos disponíveis para referência...');
       const customCommands = await CustomCommand.find({ groupId });
       if (customCommands.length > 0) {
-        commandInfo = `Comandos disponíveis:\n${customCommands.map(cmd => `- ${cmd.commandName}: ${cmd.data} | Contexto: ${cmd.contexto}`).join('\n')}`;
+        commandInfo = `Comandos disponíveis:\n${customCommands.map(cmd => `- ${cmd.commandName}: ${cmd.data}`).join('\n')}`;
       }
     }
 
@@ -644,91 +661,8 @@ export async function executeInterpretedCommand(parsed, groupId, userData) {
   }
 }
 
-/**
- * Analisa a definição de um comando para detectar UPSERT/INSERT
- * @param {string} commandDescription - Descrição do comando em linguagem natural
- * @returns {object} { upsertBy: [], explicacao: "" }
- */
-export async function analyzeCommandDefinition(commandDescription) {
-  try {
-    console.log('\n🔍 ANALISANDO DEFINIÇÃO DO COMANDO');
-    console.log(`   Descrição: "${commandDescription}"`);
-    
-    const prompt = `Você é um analisador de comandos customizados.
-
-Analise a descrição abaixo e DETERMINE SE É INSERT OU UPSERT:
-
-DESCRIÇÃO:
-"${commandDescription}"
-
-REGRAS:
-1. Se a descrição menciona "altera", "atualiza", "modifica", "sobrescreve" + menciona QUAIS campos são chave para busca:
-   → É UPSERT
-   → Identifique os campos que serão a chave (normalmente menciona "se o registro com $campo1 e $campo2 já existir")
-   → Extraia apenas os nomes dos campos (sem o $)
-   → Retorne: "upsertBy": ["campo1", "campo2"]
-
-2. Se a descrição menciona APENAS inserir/adicionar (sem alteração):
-   → É INSERT
-   → Retorne: "upsertBy": []
-
-IMPORTANTE:
-- Procure por keywords: "ou altera", "ou modifica", "já existir", "se registrado"
-- Extraia os nomes dos campos ANTES dessas keywords (ex: "$ano e $mes" → ["ano", "mes"])
-- Remova o símbolo $ dos nomes
-
-Retorne APENAS um JSON:
-{
-  "tipo": "insert | upsert",
-  "upsertBy": ["campo1", "campo2"] ou [],
-  "explicacao": "Resumo breve do que foi detectado",
-  "confianca": 0.95
-}`;
-
-    console.log('\n📤 Enviando para ChatGPT...');
-    const response = await getOpenAIClient().chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 500,
-    });
-
-    const content = response.choices[0].message.content.trim();
-    console.log('\n📨 RESPOSTA DO CHATGPT:');
-    console.log('═'.repeat(80));
-    console.log(content);
-    console.log('═'.repeat(80));
-    
-    // Tentar fazer parse
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.warn('⚠️ Não consegui extrair JSON');
-        return { upsertBy: [], explicacao: 'Não foi possível analisar' };
-      }
-      parsed = JSON.parse(jsonMatch[0]);
-    }
-
-    console.log('\n✅ ANÁLISE CONCLUÍDA:');
-    console.log(`   Tipo: ${parsed.tipo}`);
-    console.log(`   upsertBy: ${JSON.stringify(parsed.upsertBy)}`);
-    console.log(`   Explicação: ${parsed.explicacao}`);
-
-    return {
-      upsertBy: parsed.upsertBy || [],
-      explicacao: parsed.explicacao
-    };
-  } catch (error) {
-    console.error('❌ Erro ao analisar definição do comando:', error.message);
-    return { upsertBy: [], explicacao: 'Erro ao analisar' };
-  }
-}
 
 export default {
   parseNaturalCommand,
   executeInterpretedCommand,
-  analyzeCommandDefinition,
 };

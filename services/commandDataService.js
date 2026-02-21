@@ -7,15 +7,11 @@ export class CommandDataService {
   /**
    * Buscar todos os dados de um comando em um grupo
    */
-  static async getCommandData(groupId, commandName, contexto = null) {
+  static async getCommandData(groupId, commandName) {
     const filter = {
       groupId,
       commandName: commandName.toLowerCase(),
     };
-
-    if (contexto) {
-      filter.contexto = contexto.toLowerCase();
-    }
 
     return await CommandData.find(filter).sort({ createdAt: -1 });
   }
@@ -23,27 +19,13 @@ export class CommandDataService {
   /**
    * Buscar dados de um usuário específico
    */
-  static async getUserCommandData(groupId, userId, contexto = null) {
+  static async getUserCommandData(groupId, userId) {
     const filter = {
       groupId,
       userId,
     };
 
-    if (contexto) {
-      filter.contexto = contexto.toLowerCase();
-    }
-
     return await CommandData.find(filter).sort({ createdAt: -1 });
-  }
-
-  /**
-   * Buscar dados por contexto em um grupo
-   */
-  static async getDataByContext(groupId, contexto) {
-    return await CommandData.find({
-      groupId,
-      contexto: contexto.toLowerCase(),
-    }).sort({ createdAt: -1 });
   }
 
   /**
@@ -71,17 +53,13 @@ export class CommandDataService {
   }
 
   /**
-   * Somar valores de um comando (útil para contextos numéricos)
+   * Somar valores de um comando
    */
-  static async sumCommandValues(groupId, commandName, contexto = null) {
+  static async sumCommandValues(groupId, commandName) {
     const conditions = {
       groupId,
       commandName: commandName.toLowerCase(),
     };
-
-    if (contexto) {
-      conditions.contexto = contexto.toLowerCase();
-    }
 
     const result = await CommandData.aggregate([
       { $match: conditions },
