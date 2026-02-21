@@ -1,0 +1,278 @@
+TIMESTAMP: 21/02/2026, 01:36:43
+================================================================================
+
+PROMPT ENVIADO AO CHATGPT:
+================================================================================
+Você é um interpretador de APENAS os comandos customizados criados pelo admin do grupo.
+
+IMPORTANTE: Você NÃO administra os comandos fixos (#admin, #renunciar, #grupo, #comando).
+Você APENAS interpreta comandos criados pelo admin e listados abaixo.
+
+ℹ️ TIPO: LIST/CONSULTA - Este é um comando de LISTAGEM/CONSULTA.
+Você NÃO vai receber dados para salvar. Você vai construir uma QUERY para consultar dados no MongoDB.
+
+
+COMANDO QUE O USUÁRIO ESTA EXECUTANDO:
+#metas: liste os registros de #metames mostrando a ordem. $mes - $ano - $meta.  Agrupa por $mes e $ano, e exiba a soma de $mera.  EXIBA o $total de registros no rodapé | Contexto: generico
+
+DADOS DO USUÁRIO:
+{
+  "groupId": "120363423847788469@g.us",
+  "usuario": "Tony Bignardi",
+  "idUsuario": "135755393454210@lid",
+  "isAdmin": true,
+  "data": "2026-02-21T05:36:37.434Z",
+  "vinculo": "null"
+}
+
+TIPOS DE AÇÕES POSSÍVEIS:
+
+2. LISTAR/CONSULTAR - Quando usuário quer ver dados
+IMPORTANTE: Você NÃO acessa o MongoDB! Você constrói a QUERY que o servidor vai executar.
+
+⚠️ TIPO LIST: Este comando NÃO salva dados novos. Ele CONSULTA dados já salvos no MongoDB por comandos INSERT.
+
+🔴 CRÍTICO - QUAL COMANDO USAR NA QUERY:
+A descrição do comando acima pode mencionar outro comando (ex: "lista as #metames").
+SE A DESCRIÇÃO MENCIONA UM COMANDO (#XXXX):
+  → VOCÊ OBRIGATORIAMENTE USA ESSE COMANDO NA QUERY
+  → EXTRAI exatamente o #COMANDO que está escrito na descrição
+  → NÃO usa o comando atual, SEMPRE usa o mencionado na descrição
+  
+EXEMPLO:
+  Descrição: "lista todas as #metames com $mes, $ano, $meta"
+  → Você VÊ: #metames
+  → Você USA na query: {"$match": {"commandName": "#metames", ...}}
+  → Você NÃO usa: #metas (o comando atual)
+
+SE A DESCRIÇÃO NÃO menciona outro comando:
+  → Use o próprio comando como commandName
+
+Para LISTAGENS de múltiplos resultados ou rankings, você DEVE retornar 3 templates:
+- cabecalho: Texto que aparece uma vez no início (ex: título com emojis)
+- repeticoes: Template que se repete para CADA resultado (com placeholders como {nome}, {valor})
+- rodape: Texto que aparece uma vez no final (ex: soma/total com emojis)
+
+🔴 CRÍTICO - TEMPLATE USA PLACEHOLDERS!
+O template SEMPRE usa placeholders {campo}.
+
+ERRADO:
+{
+  "repeticoes": "1. João - 100km
+2. Maria - 95km"  ❌ ERRADO!
+}
+
+CORRETO:
+{
+  "repeticoes": "{$ordem}. {nome} - {total}km"  ✅ CERTO! Placeholders!
+}
+
+O servidor vai substituir {$ordem}, {nome}, {total} pelos valores de cada resultado.
+
+Sempre retorne:
+{
+  "acao": "listar",
+  "comando": "#nome",
+  "queryMongoDB": [...aggregation pipeline...],
+  "template": {
+    "cabecalho": "...",
+    "repeticoes": "... {$ordem} ... {campo1} ... {campo2} ...",
+    "rodape": "..."
+  },
+  "processamento": "Instrução sobre como processar os dados",
+  "explicacao": "O que será mostrado ao usuário",
+  "confianca": 0.95,
+  "erro": null,
+  "entendeu": true
+}
+
+REGRAS PARA QUERIES MONGODB:
+1. SEMPRE filtre por groupId no primeiro $match! Isso evita trazer dados de outros grupos.
+2. SEMPRE filtre por commandName na query! Veja regra CRÍTICA acima.
+3. Se o comando tem campos específicos ($km, $mes, etc), use $dados.NOMECAMPO na aggregation
+4. Se o comando NÃO tem campos, use $dados direto
+5. SEMPRE use $convert para conversão numérica segura: {"$convert": {"input": "$dados", "to": "double", "onError": 0}}
+6. ⚠️ NÃO use operações de ARRAY ($indexOfArray, $pull, $push) em campos STRING!
+   - Exemplo ERRADO: "$indexOfArray": ["$commandName", "#tag"] → commandName é STRING!
+   - Se precisa de ordem, USE {$ordem} no template, NÃO na query
+
+⚠️ NOMES DOS USUÁRIOS:
+- SE A DESCRIÇÃO MENCIONA "nome" ou "nome personalizado" ou "display name":
+  → Use $lookup para trazer nomes personalizados da tabela UserName
+  → {"$lookup": {"from": "usernames", "localField": "userId", "foreignField": "userId", "as": "userInfo"}}
+  → {"$addFields": {"nome": {"$cond": [{"$gt": [{"$size": "$userInfo"}, 0]}, {"$arrayElemAt": ["$userInfo.nomePersonalizado", 0]}, "$userName"]}}}
+  
+- SE A DESCRIÇÃO NÃO MENCIONA "nome":
+  → Use apenas "$userName" diretamente (sem lookup)
+  → Simplifique a query omitindo $lookup e $addFields
+
+6. O campo deve retornar um array com objetos contendo pelo menos um campo "total" para cálculo de {$somador}
+
+EXEMPLOS:
+
+A) Se descrição NÃO menciona nome (USE APENAS $userName):
+[
+  {"$match": {"groupId": "${groupId}", "commandName": "#comando"}},
+  {"$group": {"_id": "$userName", "total": {"$sum": {"$convert": {"input": "$dados", "to": "double", "onError": 0}}}}},
+  {"$sort": {"total": -1}},
+  {"$limit": 10}
+]
+
+B) Se descrição MENCIONA nome (USE LOOKUP E $addFields):
+[
+  {"$match": {"groupId": "${groupId}", "commandName": "#comando"}},
+  {"$lookup": {"from": "usernames", "localField": "userId", "foreignField": "userId", "as": "userInfo"}},
+  {"$addFields": {"nome": {"$cond": [{"$gt": [{"$size": "$userInfo"}, 0]}, {"$arrayElemAt": ["$userInfo.nomePersonalizado", 0]}, "$userName"]}}},
+  {"$group": {"_id": "$nome", "total": {"$sum": {"$convert": {"input": "$dados", "to": "double", "onError": 0}}}}},
+  {"$sort": {"total": -1}},
+  {"$limit": 10}
+]
+
+🔴 CRÍTICO - SE A DESCRIÇÃO MENCIONA CAMPOS ESPECÍFICOS COMO $km ou $mes ou $ano:
+A descrição do comando pode mencionar campos específicos (ex: "total de $km corrido", "soma de $mes").
+QUANDO ISSO ACONTECE:
+  → SEMPRE use "$dados.NOMECAMPO" na aggregation (NEM "$dados" sozinho)
+  → EXEMPLO: Se descrição diz "$total de $km", use: "$convert": {"input": "$dados.km", "to": "double"}
+  → Se descrição diz "$mes" e "$ano", use: "$dados.mes" e "$dados.ano"
+
+EXEMPLO C - Descrição menciona $km (USE $dados.km):
+[
+  {"$match": {"groupId": "${groupId}", "commandName": "#comando"}},
+  {"$lookup": {"from": "usernames", "localField": "userId", "foreignField": "userId", "as": "userInfo"}},
+  {"$addFields": {"nome": {"$cond": [{"$gt": [{"$size": "$userInfo"}, 0]}, {"$arrayElemAt": ["$userInfo.nomePersonalizado", 0]}, "$userName"]}}},
+  {"$group": {"_id": "$nome", "total": {"$sum": {"$convert": {"input": "$dados.km", "to": "double", "onError": 0}}}}},
+  {"$sort": {"total": -1}},
+  {"$limit": 10}
+]
+
+CAMPOS ESPECIAIS:
+- {$contador} = quantidade de linhas retornadas (calculado automaticamente)
+- {$somador} = soma de todos os "total" retornados (calculado automaticamente)
+- {$ordem} = posição numerada 1, 2, 3... (usado em repeticoes) - NÃO CALCULE ISTO NA QUERY!
+- {nome} ou {userName}, {total}, {qualquer_campo} = campos retornados da query
+
+⚠️ ATENÇÃO - TEMPLATE SEMPRE USA PLACEHOLDERS:
+Seu template SEMPRE deve retornar placeholders tipo {$ordem}, {mes}, {ano}, {meta}
+O servidor faz a substituição automática dos placeholders.
+
+EXEMPLOS CORRETOS:
+- "repeticoes": "{$ordem}. {mes} - {ano} - {meta}"
+- "repeticoes": "👤 {nome}: {total}km"
+- "rodape": "Total: {$somador}km"
+
+EXEMPLOS ERRADOS (NUNCA FAÇA):
+- "repeticoes": "1. Janeiro - 100km"  ❌ ERRADO!
+- "template": "João: 50, Maria: 75"  ❌ Não substitua aqui!
+
+🔴 CRÍTICO - NÃO USE $indexOfArray, $position, ou funções de array em campos STRING:
+Se você PRECISAR exibir posição/ordem:
+  → NÃO tente calcular na query usando $indexOfArray, $position, etc
+  → DEIXE O TEMPLATE FAZER ISSO automaticamente com {$ordem}
+  → O servidor calcula a ordem dos resultados
+  
+ERRADO:
+{
+  "$project": {
+    "ordem": {"$add": [1, {"$indexOfArray": ["$commandName", "#tag"]}]},  ❌ ERRADO!
+    "campo1": "$dados.campo"
+  }
+}
+
+CORRETO:
+{
+  "$project": {
+    "campo1": "$dados.campo"
+  }
+}
+// No template, use: "{$ordem}. {campo1}"
+
+
+ESTRUTURA DO MONGODB (CommandData):
+Cada registro tem esses campos:
+- groupId: string (ID do grupo - SEMPRE use para filtrar!)
+- commandName: string (nome do comando ex: #add, #rank)
+- userId: string (ID do usuário que executou)
+- userName: string (nome do usuário padrão do WhatsApp)
+- dados: string ou objeto (▼ VER ABAIXO)
+- contexto: string (contexto do comando ex: "km", "pontuação")
+- createdAt: date (timestamp automático)
+- vinculo: object optional - REFERENCIA PARA OUTRO REGISTRO COMMANDDATA
+
+⚠️ ESTRUTURA DO CAMPO "dados":
+SE O COMANDO TEM CAMPOS ESPECÍFICOS (ex: $km, $mes, $ano):
+  → dados é um OBJETO com os nomes dos campos
+  → Exemplo: dados: { "km": "50", "mes": "02", "ano": "2026" }
+  → Na query: Use "$dados.km", "$dados.mes", etc
+
+SE O COMANDO NÃO TEM CAMPOS ESPECÍFICOS:
+  → dados é uma STRING
+  → Exemplo: dados: "150"
+  → Na query: Use "$dados" direto
+
+ESTRUTURA DO MONGODB (UserName - Nomes Personalizados):
+Cada registro tem: userId, nomePersonalizado, nomeOriginal, createdAt
+
+MENSAGEM DO USUÁRIO:
+"#metas"
+
+Responda APENAS com JSON válido.
+
+================================================================================
+RESPOSTA DO CHATGPT:
+================================================================================
+```json
+{
+  "acao": "listar",
+  "comando": "#metames",
+  "queryMongoDB": [
+    {
+      "$match": {
+        "groupId": "120363423847788469@g.us",
+        "commandName": "#metames"
+      }
+    },
+    {
+      "$group": {
+        "_id": {
+          "mes": "$dados.mes",
+          "ano": "$dados.ano"
+        },
+        "meta": {
+          "$sum": {
+            "$convert": {
+              "input": "$dados.meta",
+              "to": "double",
+              "onError": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "$project": {
+        "mes": "$_id.mes",
+        "ano": "$_id.ano",
+        "meta": "$meta"
+      }
+    },
+    {
+      "$sort": {
+        "ano": 1,
+        "mes": 1
+      }
+    }
+  ],
+  "template": {
+    "cabecalho": "📊 Lista de Metas por Mês e Ano",
+    "repeticoes": "{$ordem}. {mes} - {ano} - {meta}",
+    "rodape": "Total de registros: {$contador}"
+  },
+  "processamento": "Os dados serão agrupados por mês e ano, mostrando a soma das metas.",
+  "explicacao": "Você verá a lista de metas agrupadas por mês e ano, com o total de registros no final.",
+  "confianca": 0.95,
+  "erro": null,
+  "entendeu": true
+}
+```
+
+================================================================================

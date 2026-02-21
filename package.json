@@ -1,0 +1,30 @@
+{
+  "name": "whatsapp-bot-gerenciador",
+  "version": "1.0.0",
+  "description": "Bot gerenciador de demandas para grupos WhatsApp",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "gerenciador",
+    "mongodb"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.0.3",
+    "mongoose": "^7.0.0",
+    "openai": "^4.104.0",
+    "puppeteer": "^19.0.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
